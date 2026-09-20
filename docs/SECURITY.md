@@ -10,6 +10,8 @@ Path containment does not provide isolation from a malicious local user, hard li
 
 `--allow-shell` explicitly enables commands with the operating-system user's full authority. The configured root is only the initial/selected working directory for commands. A command can change directory, access the network and other files, or spawn subprocesses. The agent clears inherited environment variables except PATH, HOME and LANG, but commands can still access anything the OS user can access. Use a dedicated low-privilege OS account or externally managed sandbox when that boundary is required.
 
+`--allow-screenshot` separately permits `get_screenshot` to read the visible contents of a macOS display. It is not confined by `--root`; macOS Screen Recording permission remains the operating-system boundary. Captures use fixed system binaries without shell execution, are converted to bounded JPEG data in a private temporary path, removed after encoding, and relayed as MCP image content. Do not enable screenshot access on a device where the authorized client should not see other applications, notifications, or secrets visible on screen.
+
 Sessions use separate process groups and bounded output. Ctrl+C, SIGTERM, device shutdown, revocation and process deadlines terminate tracked groups and reap the shell. A program that deliberately daemonizes into a different session can escape that process group. This is lifecycle management, not hostile-code containment. `force_terminate` only targets known sessions; it cannot target an arbitrary system PID.
 
 ## Credentials and authorization

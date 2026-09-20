@@ -2,14 +2,14 @@
 
 A self-hosted remote MCP file and terminal service, implemented mainly in Rust and hosted on Cloudflare Workers with a SQLite-backed Durable Object. The native agent runs on an explicitly paired computer and establishes an outbound authenticated WebSocket. The dashboard approves devices, shows connection status and activity, and revokes access.
 
-This is an independent implementation of the core workflow described by [Remote Desktop Commander](https://github.com/desktop-commander/remote-desktop-commander). Its hosted implementation is proprietary; this project does not copy its implementation or visual assets. This project provides remote file and process tools, not graphical desktop streaming.
+This is an independent implementation of the core workflow described by [Remote Desktop Commander](https://github.com/desktop-commander/remote-desktop-commander). Its hosted implementation is proprietary; this project does not copy its implementation or visual assets. This project provides remote file/process tools and explicit opt-in screenshots, not graphical desktop streaming.
 
 ## What is included
 
 | Area | Implementation |
 | --- | --- |
-| Native agent | Rust/Tokio executable for macOS and Linux; explicit folder, write, and shell permissions |
-| MCP service | Rust/WASM, Streamable HTTP, 23 tools, bounded requests and responses |
+| Native agent | Rust/Tokio executable for macOS and Linux; explicit folder, write, shell, and macOS screenshot permissions |
+| MCP service | Rust/WASM, Streamable HTTP, 24 tools, bounded requests and responses |
 | Authorization | OAuth authorization code with PKCE S256, dynamic public client registration, exact redirect and resource validation, rotating refresh tokens |
 | Device access | Expiring pairing codes, owner approval, separate device credentials, connection replacement and revocation |
 | Dashboard | Cloudflare Access owner login; separate administrator credential held in tab memory; independent MFA temporarily deferred |
@@ -53,7 +53,7 @@ Start the agent with an existing directory:
   --insecure-localhost
 ```
 
-This enables file reads. Add `--allow-write` for edits and `--allow-shell` for process sessions. Both the OAuth scope and the local flag must permit an operation. The `--root` capability confines the file tools; it is not a shell sandbox. Shell execution has the operating-system user's authority. Stop with Ctrl+C, use `shutdown_device`, or revoke the computer in the dashboard.
+This enables file reads. Add `--allow-write` for edits, `--allow-shell` for process sessions, and `--allow-screenshot` to expose `get_screenshot` on macOS. Screenshot capture also requires macOS Screen Recording permission for the agent binary. Both the OAuth scope and the relevant local flag must permit an operation. The `--root` capability confines the file tools; it is not a shell sandbox and does not scope screenshots. Shell execution has the operating-system user's authority. Stop with Ctrl+C, use `shutdown_device`, or revoke the computer in the dashboard.
 
 Production pairing and agent commands use the public HTTPS origin and omit `--insecure-localhost`. An optional macOS LaunchAgent installer is available; see below.
 
@@ -132,7 +132,7 @@ Generic MCP clients are available for local integration tests only: set `CHATGPT
 After deploying and building the release agent, obtain a short-lived owner Access session as described in [operations](docs/OPERATIONS.md#owner-login-for-setup-commands), then run:
 
 ```sh
-npm run setup:macos -- --root "$HOME" --name "My Mac" --allow-write --allow-shell
+npm run setup:macos -- --root "$HOME" --name "My Mac" --allow-write --allow-shell --allow-screenshot
 ```
 
 This pairs the Mac using your local owner key, installs the binary and private device credential under `~/Library/Application Support/Remote Commander/`, and starts `app.remote-commander.agent`. The LaunchAgent uses `RunAtLoad=true` and `KeepAlive=false`; network reconnection happens inside the running agent. Logs are private under `~/Library/Logs/Remote Commander/`. Re-running reuses the same device and updates the binary and arguments. Shell commands run with your OS user’s authority; home is their initial working directory, not a shell sandbox.
@@ -146,7 +146,7 @@ launchctl bootout "gui/$(id -u)/app.remote-commander.agent"
 
 See [operations](docs/OPERATIONS.md) for restart, removal, and access recovery. `npm run check:live` verifies the actual installed agent using a disposable home-directory fixture, then revokes its temporary test authorization. It refuses to replace a linked ChatGPT connection or an open linking window; use it before connecting ChatGPT.
 
-After connecting, start with `list_devices`, then `ping_device` and `get_config`. File paths are relative to home: `Documents/example.txt` addresses `~/Documents/example.txt`. `start_process` returns a session ID; retrieve output with `read_process_output`.
+After connecting, start with `list_devices`, then `ping_device` and `get_config`. File paths are relative to home: `Documents/example.txt` addresses `~/Documents/example.txt`. `start_process` returns a session ID; retrieve output with `read_process_output`. On an agent started with `--allow-screenshot`, `get_screenshot` returns a bounded JPEG MCP image for one display; the default is display 1 with a 1600-pixel maximum dimension.
 
 For explicitly authorized machine-wide file access, use `--root / --allow-write --allow-shell` and grant the installed agent **Full Disk Access** in macOS settings; see [machine-wide access](docs/OPERATIONS.md#machine-wide-file-access-and-macos-privacy). With `/` as root, paths use `Users/yuya/Documents/example.txt`. Launch GUI apps through Launch Services, for example `start_process` with `/usr/bin/open -a 'Microsoft Edge'`.
 

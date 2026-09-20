@@ -20,6 +20,7 @@ futures-util = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 url = "2"
 uuid = { version = "1", features = ["v4"] }
+base64 = "0.22"
 cap-std = "3"
 libc = "0.2"
 

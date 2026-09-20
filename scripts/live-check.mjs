@@ -68,12 +68,12 @@ try {
   assert.equal(tokens.response.status, 200);
   assert.equal((await request('/oauth/authorize?' + new URLSearchParams(query))).data.error, 'connection_locked');
   await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', origin), { requestInit: { headers: { Authorization: `Bearer ${tokens.data.access_token}` } } }));
-  assert.equal((await client.listTools()).tools.length, 23);
+  assert.equal((await client.listTools()).tools.length, 24);
   const config = await call('get_config');
   assert.equal(config.root, homedir());
   assert.equal(config.allow_write, true);
   assert.equal(config.allow_shell, true);
-  results.push('Actual installed macOS agent online; root is home; read/write/shell enabled; 23 tools');
+  results.push('Actual installed macOS agent online; root is home; read/write/shell enabled; 24 tools');
   mkdirSync(path.join(projectRoot, '.local'), { recursive: true, mode: 0o700 });
   fixture = mkdtempSync(path.join(projectRoot, '.local/live-'));
   const relative = path.relative(homedir(), path.join(fixture, 'sentinel.txt'));

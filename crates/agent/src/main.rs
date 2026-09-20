@@ -1,6 +1,7 @@
 mod blocking;
 mod files;
 mod processes;
+mod screenshots;
 
 #[cfg(not(unix))]
 compile_error!(
@@ -62,6 +63,9 @@ enum Action {
         /// Grants shell commands the OS user's full authority; root is NOT a shell sandbox.
         #[arg(long)]
         allow_shell: bool,
+        /// Allows reading the visible contents of a macOS display.
+        #[arg(long)]
+        allow_screenshot: bool,
         #[arg(long)]
         insecure_localhost: bool,
     },
@@ -253,6 +257,7 @@ async fn pair(
 struct Tools {
     files: Arc<files::FileTools>,
     processes: processes::ProcessTools,
+    screenshots: Arc<screenshots::ScreenshotTools>,
     blocking: blocking::BlockingOperations,
 }
 
@@ -268,9 +273,23 @@ impl Tools {
         if !command.arguments.is_object() {
             return ToolResult::error("invalid_arguments", "arguments must be an object");
         }
+        if command.name == "get_screenshot" {
+            let screenshots = self.screenshots.clone();
+            let arguments = command.arguments.clone();
+            return match self
+                .blocking
+                .run(move || screenshots.capture(arguments))
+                .await
+            {
+                Ok(screenshot) => {
+                    ToolResult::image(screenshot.data, "image/jpeg", screenshot.metadata)
+                }
+                Err(error) => ToolResult::error("operation_failed", error),
+            };
+        }
         let result = match command.name.as_str() {
             "get_config" => Ok(
-                json!({"root":self.files.root,"allow_write":self.files.allow_write,"allow_shell":self.processes.enabled,"read_limit":READ_LIMIT,"write_limit":WRITE_LIMIT,"max_processes":8,"max_process_lifetime_ms":300000,"shell_is_sandboxed":false}),
+                json!({"root":self.files.root,"allow_write":self.files.allow_write,"allow_shell":self.processes.enabled,"allow_screenshot":self.screenshots.enabled,"read_limit":READ_LIMIT,"write_limit":WRITE_LIMIT,"max_processes":8,"max_process_lifetime_ms":300000,"shell_is_sandboxed":false}),
             ),
             "shutdown_device" => Ok(json!({"stopping":true})),
             "ping_device" => Ok(json!({"ok":true,"platform":std::env::consts::OS})),
@@ -337,11 +356,12 @@ async fn run_agent(config: &DeviceConfig, tools: &Tools, insecure: bool) -> Resu
             }
         };
         eprintln!(
-            "Connected device {}. Root: {}. Writes: {}. Shell: {}. Ctrl+C stops access.",
+            "Connected device {}. Root: {}. Writes: {}. Shell: {}. Screenshots: {}. Ctrl+C stops access.",
             config.device_id,
             tools.files.root.display(),
             tools.files.allow_write,
-            tools.processes.enabled
+            tools.processes.enabled,
+            tools.screenshots.enabled
         );
         let connected_at = Instant::now();
         let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
@@ -481,12 +501,14 @@ async fn async_main() -> Result<()> {
             root,
             allow_write,
             allow_shell,
+            allow_screenshot,
             insecure_localhost,
         } => {
             let config = load_config(&config)?;
             let files = Arc::new(files::FileTools::new(&root, allow_write)?);
             let tools = Tools {
                 processes: processes::ProcessTools::new(files.root.clone(), allow_shell)?,
+                screenshots: Arc::new(screenshots::ScreenshotTools::new(allow_screenshot)),
                 files,
                 blocking: blocking::BlockingOperations::default(),
             };

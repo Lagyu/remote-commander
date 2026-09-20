@@ -26,14 +26,17 @@ test('Rust agent → Cloudflare Durable Object → official MCP client', { timeo
     const discovery = await h.request('/.well-known/oauth-authorization-server');
     assert.deepEqual(discovery.data.code_challenge_methods_supported, ['S256']);
     const catalog = await client.listTools();
-    assert.equal(catalog.tools.length, 23);
+    assert.equal(catalog.tools.length, 24);
     assert.ok(catalog.tools.every((tool) => tool.inputSchema.additionalProperties === false));
+    const screenshot = catalog.tools.find((tool) => tool.name === 'get_screenshot');
+    assert.equal(screenshot.inputSchema.properties.display.default, 1);
+    assert.equal(screenshot.inputSchema.properties.max_dimension.default, 1600);
     const devices = await call(client, 'list_devices');
     assert.equal(devices.devices.find((d) => d.device_id === device.device_id).online, true);
     assert.equal(JSON.stringify(devices).includes(device.token), false);
     assert.equal((await call(client, 'ping_device', args())).ok, true);
     const info = await call(client, 'get_config', args());
-    assert.equal(info.allow_write, true); assert.equal(info.allow_shell, true); assert.equal(info.shell_is_sandboxed, false);
+    assert.equal(info.allow_write, true); assert.equal(info.allow_shell, true); assert.equal(info.allow_screenshot, true); assert.equal(info.shell_is_sandboxed, false);
     const replay = await h.request('/pair/token', { json: { device_code: device.device_code } });
     assert.equal(replay.response.status, 400); assert.equal(replay.data.error, 'expired_token');
     const anonymous = await h.request('/api/devices');
@@ -201,6 +204,7 @@ test('Rust agent → Cloudflare Durable Object → official MCP client', { timeo
     const secondary = { device_id: paired.device_id };
     await call(client, 'write_file', { ...secondary, path: 'readonly-denied', content: 'no' }, true);
     await call(client, 'start_process', { ...secondary, command: 'printf unexpected' }, true);
+    await call(client, 'get_screenshot', secondary, true);
     assert.equal((await call(client, 'read_file', { ...secondary, path: 'hello.txt', length: 1 })).content, 'first line\n');
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
     await page.getByRole('heading', { name: 'Browser-paired computer' }).waitFor();

@@ -172,7 +172,7 @@ export async function harness({ chatgptOnly = false, access } = {}) {
     return launch('agent', path.join(root, 'target/debug/remote-commander'), ['run', '--config', configPath, '--root', files, '--insecure-localhost', ...permissions]);
   }
 
-  async function startAgent(device, permissions = ['--allow-write', '--allow-shell']) {
+  async function startAgent(device, permissions = ['--allow-write', '--allow-shell', '--allow-screenshot']) {
     const configPath = path.join(directory, `device-${secret().slice(0, 8)}.json`);
     writeFileSync(configPath, JSON.stringify({ server: origin, device_id: device.device_id, token: device.token }), { mode: 0o600 });
     const handle = agent(configPath, permissions);

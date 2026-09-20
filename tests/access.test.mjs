@@ -47,7 +47,7 @@ test('Access protects administration without interrupting an existing ChatGPT an
     const refreshed = await h.request('/oauth/token', { form: { grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: tokens.clientId, resource: `${h.origin}/mcp` } });
     assert.equal(refreshed.response.status, 200);
     const client = await h.sdk(refreshed.data);
-    assert.equal((await client.listTools()).tools.length, 23);
+    assert.equal((await client.listTools()).tools.length, 24);
     const config = await until(async () => {
       try { return await call(client, 'get_config', { device_id: device.device_id }); } catch { return false; }
     }, 'agent reconnect through public authenticated WebSocket');

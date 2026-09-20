@@ -85,7 +85,9 @@ An owner who wants file tools to reach every OS-accessible location can install 
 
 In **System Settings → Privacy & Security → Full Disk Access**, add the installed executable at `~/Library/Application Support/Remote Commander/remote-commander` and enable it. Authenticate locally when macOS asks, then restart the agent. The permission must cover the installed binary, not just Terminal or a development build. Recheck it after replacing the binary if macOS prompts again.
 
-A pending Downloads/Desktop/Documents prompt can block an OS file call. The agent now processes other requests and heartbeats independently, returns a descriptive timeout after 20 seconds, and bounds outstanding OS work. Timed-out work may still finish after consent; inspect state before retrying changes. Logs show each tool's start, outcome and elapsed time without its arguments. `get_config` and `ping_device` remain available during blocked file operations.
+A pending Downloads/Desktop/Documents or Screen Recording prompt can block an OS operation. The agent processes other requests and heartbeats independently, returns a descriptive timeout after 20 seconds, and bounds outstanding OS work. Timed-out work may still finish after consent; inspect state before retrying changes. Logs show each tool's start, outcome and elapsed time without its arguments. `get_config` and `ping_device` remain available during blocked file or screenshot operations.
+
+Screenshot access is independent of the file root. Start or install the agent with `--allow-screenshot`, then enable Screen Recording for the exact agent executable in System Settings → Privacy & Security → Screen Recording. `get_screenshot` captures one display, defaults to display 1, and downscales/compresses the result before relay so it stays within the protocol frame limit.
 
 To launch Microsoft Edge on macOS, use `start_process` with `command: "/usr/bin/open -a 'Microsoft Edge'"`, then inspect the returned session with `read_process_output`. Launch Services owns the GUI application's lifetime. Directly running the app executable remains subject to the session timeout and process-group cleanup.
 

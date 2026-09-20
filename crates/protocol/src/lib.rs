@@ -24,14 +24,21 @@ pub struct AgentResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TextContent {
-    pub r#type: String,
-    pub text: String,
+#[serde(tag = "type")]
+pub enum ToolContent {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "image")]
+    Image {
+        data: String,
+        #[serde(rename = "mimeType")]
+        mime_type: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolResult {
-    pub content: Vec<TextContent>,
+    pub content: Vec<ToolContent>,
     #[serde(rename = "isError")]
     pub is_error: bool,
     #[serde(rename = "structuredContent", skip_serializing_if = "Option::is_none")]
@@ -41,12 +48,22 @@ pub struct ToolResult {
 impl ToolResult {
     pub fn ok(value: Value) -> Self {
         Self {
-            content: vec![TextContent {
-                r#type: "text".into(),
+            content: vec![ToolContent::Text {
                 text: value.to_string(),
             }],
             is_error: false,
             structured_content: Some(value),
+        }
+    }
+
+    pub fn image(data: String, mime_type: &str, metadata: Value) -> Self {
+        Self {
+            content: vec![ToolContent::Image {
+                data,
+                mime_type: mime_type.into(),
+            }],
+            is_error: false,
+            structured_content: Some(metadata),
         }
     }
 
@@ -64,6 +81,7 @@ pub fn scope_for(name: &str) -> Option<&'static str> {
         | "get_recent_activity"
         | "ping_device"
         | "get_config"
+        | "get_screenshot"
         | "list_directory"
         | "read_file"
         | "read_multiple_files"
@@ -140,6 +158,18 @@ pub fn tool_definitions() -> Vec<Value> {
         "get_config",
         "Read the agent's root, enabled capabilities, and bounded operation limits.",
         json!({}),
+        &[],
+        true,
+    );
+    add(
+        "get_screenshot",
+        "Capture one macOS display as a bounded JPEG image. Requires local --allow-screenshot and macOS Screen Recording permission.",
+        json!({
+            "display":{"type":"integer","minimum":1,"maximum":16,"default":1},
+            "max_dimension":{"type":"integer","minimum":320,"maximum":2560,"default":1600},
+            "quality":{"type":"integer","minimum":30,"maximum":90,"default":65},
+            "include_cursor":{"type":"boolean","default":false}
+        }),
         &[],
         true,
     );
@@ -285,5 +315,20 @@ mod tests {
             assert!(scope_for(tool["name"].as_str().unwrap()).is_some());
             assert_eq!(tool["inputSchema"]["additionalProperties"], false);
         }
+    }
+
+    #[test]
+    fn image_results_use_mcp_image_content_without_duplicating_payload() {
+        let result = ToolResult::image(
+            "YWJj".into(),
+            "image/jpeg",
+            json!({"bytes":3,"mime_type":"image/jpeg"}),
+        );
+        let value = serde_json::to_value(result).unwrap();
+        assert_eq!(value["content"][0]["type"], "image");
+        assert_eq!(value["content"][0]["data"], "YWJj");
+        assert_eq!(value["content"][0]["mimeType"], "image/jpeg");
+        assert_eq!(value["structuredContent"]["bytes"], 3);
+        assert!(value["structuredContent"].get("data").is_none());
     }
 }
