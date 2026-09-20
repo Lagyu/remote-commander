@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "remote-commander",
+  "main": "build/worker/shim.mjs",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": true,
+  "preview_urls": false,
+  "build": { "command": "node scripts/build-worker.mjs" },
+  "vars": { "PUBLIC_URL": "http://127.0.0.1:8787", "ALLOW_LOCALHOST": "true" },
+  "durable_objects": { "bindings": [{ "name": "COMMANDER", "class_name": "Commander" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Commander"] }],
+  "observability": { "enabled": false },
+  "dev": { "ip": "127.0.0.1", "port": 8787 }
+}

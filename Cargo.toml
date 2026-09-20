@@ -1,0 +1,24 @@
+[workspace]
+members = ["crates/protocol", "crates/agent", "crates/worker"]
+default-members = ["crates/protocol", "crates/agent"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.88"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+rdc-protocol = { path = "crates/protocol" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+# wasm-bindgen needs the externref table's symbol name while generating catch
+# wrappers. Strip debug information, preserving symbols until WASM packaging.
+strip = "debuginfo"

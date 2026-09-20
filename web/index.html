@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Remote Commander · Your computers, connected</title>
+  <link rel="stylesheet" href="/app.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="Remote Commander home"><span class="brand-mark" aria-hidden="true">⌘</span><span>Remote<br>Commander</span></a>
+      <p class="eyebrow">YOUR WORKSPACE</p>
+      <nav aria-label="Workspace navigation">
+        <a href="#devices">Computers <span aria-hidden="true">↗</span></a>
+        <a href="#activity">Activity <span aria-hidden="true">↗</span></a>
+        <a href="#setup">Connection guide <span aria-hidden="true">↗</span></a>
+      </nav>
+      <div class="sidebar-note"><span class="status-dot" aria-hidden="true"></span>Owner-managed access<p>Pair a computer locally.<br>Decide what it can do.<br>Disconnect at any time.</p></div>
+    </aside>
+    <main>
+      <header class="topbar"><span class="breadcrumb">Workspace / Overview</span><button id="logout" class="text-button" type="button" hidden>Lock workspace</button></header>
+      <div class="page-heading"><div><p class="eyebrow">REMOTE ACCESS, ON YOUR TERMS</p><h1>Your computers.<br>One workspace.</h1><p class="lead">Connect your files and terminal to an MCP client, wherever you work.</p></div><span class="orbit" aria-hidden="true">↗</span></div>
+      <p id="notice" class="notice" role="status" aria-live="polite" hidden></p>
+      <section id="login-panel" class="panel login-panel" aria-labelledby="login-heading">
+        <div><span class="tag">PRIVATE WORKSPACE</span><h2 id="login-heading">Unlock your workspace</h2><p>Enter the administrator key configured for this deployment. The key stays in this tab's memory until you lock or leave it.</p></div>
+        <form id="login-form"><label for="admin-key">Administrator key</label><input id="admin-key" type="password" autocomplete="current-password" minlength="32" required placeholder="Enter your administrator key"><button type="submit">Unlock workspace <span aria-hidden="true">→</span></button></form>
+      </section>
+      <div id="workspace" hidden>
+        <section id="devices" aria-labelledby="devices-heading">
+          <div class="section-heading"><div><p class="eyebrow">DEVICE DIRECTORY</p><h2 id="devices-heading">Connected computers <span id="device-count" class="count">0</span></h2></div><div class="actions"><button id="refresh" type="button" class="secondary">Refresh</button><button id="pair-open" type="button">+ Pair a computer</button></div></div>
+          <div id="device-list" class="device-grid"></div>
+        </section>
+        <section id="activity" class="panel" aria-labelledby="activity-heading"><div class="section-heading"><div><p class="eyebrow">RECENT OPERATIONS</p><h2 id="activity-heading">Workspace activity</h2></div><span class="muted">Latest 200 events</span></div><p class="muted">Records show operation names and outcomes. File contents, terminal commands, and credentials are not retained in the activity log.</p><div class="table-wrap"><table><thead><tr><th scope="col">Operation</th><th scope="col">Computer</th><th scope="col">Outcome</th><th scope="col">Time</th></tr></thead><tbody id="activity-list"></tbody></table></div></section>
+        <section class="panel access-panel" aria-labelledby="access-heading"><div><h2 id="access-heading">Your ChatGPT connection</h2><p id="connection-status">Access is locked.</p></div><div class="actions"><button id="open-connection" type="button">Allow ChatGPT connection</button><button id="revoke-clients" class="danger secondary" type="button">Revoke client access</button></div></section>
+      </div>
+      <section id="setup" class="panel" aria-labelledby="setup-heading"><p class="eyebrow">CONNECTION GUIDE</p><h2 id="setup-heading">From local computer to remote workspace</h2><div class="steps"><article><span class="step-number">01</span><h3>Build the agent</h3><p>In the project directory, build the Rust agent on macOS or Linux.</p><pre><code>cargo build --release -p rdc-agent</code></pre></article><article><span class="step-number">02</span><h3>Pair your computer</h3><p>Run locally, then verify and approve the displayed pairing code in this workspace.</p><pre><code id="pair-command"></code></pre></article><article><span class="step-number">03</span><h3>Choose a folder</h3><p>Start with read access. Add <code>--allow-write</code> for file changes or <code>--allow-shell</code> for shell access.</p><pre><code>./target/release/remote-commander run --root /path/to/project</code></pre></article></div><div class="endpoint"><div><label for="mcp-endpoint">MCP server URL</label><input id="mcp-endpoint" class="mono" readonly></div><button id="copy-endpoint" type="button" class="secondary">Copy URL</button></div><p class="muted">Connect a Streamable HTTP MCP client using OAuth. Shell access runs as the local operating-system user; the selected folder does not sandbox shell commands.</p></section>
+      <footer>Remote Commander <span>Rust agent · Cloudflare Workers · Owner-controlled access</span></footer>
+    </main>
+  </div>
+  <dialog id="pair-dialog" aria-labelledby="pair-heading"><form id="pair-form"><div class="section-heading"><h2 id="pair-heading">Pair a computer</h2><button id="pair-close" type="button" class="text-button" aria-label="Close pairing dialog">✕</button></div><p>Enter the eight-character code shown by the agent running on your computer.</p><label for="pair-code">Pairing code</label><input id="pair-code" name="code" maxlength="8" minlength="8" pattern="[A-Za-z0-9]{8}" autocomplete="off" spellcheck="false" required placeholder="ABCD2345"><button type="submit">Find computer</button></form><div id="pair-preview" hidden><p>Confirm that this is the computer and code shown in your local terminal.</p><h3 id="pair-name"></h3><p id="verified-code" class="mono"></p><button id="pair-approve" type="button">Approve this computer</button></div><p id="pair-status" role="status" aria-live="polite"></p></dialog>
+</body>
+</html>

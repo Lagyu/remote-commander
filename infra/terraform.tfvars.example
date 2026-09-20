@@ -1,0 +1,4 @@
+account_id  = "00000000000000000000000000000000"
+zone_id     = "00000000000000000000000000000000"
+worker_name = "remote-commander"
+hostname    = "commander.example.com"

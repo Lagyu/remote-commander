@@ -1,0 +1,24 @@
+{
+  "name": "remote-commander",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build:worker": "node scripts/build-worker.mjs",
+    "dev": "wrangler dev --ip 127.0.0.1",
+    "test:e2e": "node --test --test-concurrency=1 tests/*.test.mjs",
+    "check": "cargo fmt --all --check && cargo clippy -p rdc-agent -p rdc-protocol --all-targets -- -D warnings && cargo clippy -p rdc-worker --target wasm32-unknown-unknown -- -D warnings && cargo test -p rdc-agent -p rdc-protocol && cargo build -p rdc-agent && npm run build:worker && npm run test:e2e",
+    "deploy": "node scripts/deploy.mjs",
+    "setup:macos": "node scripts/install-agent.mjs",
+    "check:live": "node scripts/live-check.mjs"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "playwright": "1.60.0",
+    "wrangler": "4.135.0",
+    "ws": "8.21.3"
+  }
+}
