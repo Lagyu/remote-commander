@@ -9,7 +9,7 @@ This is an independent implementation of the core workflow described by [Remote 
 | Area | Implementation |
 | --- | --- |
 | Native agent | Rust/Tokio executable for macOS and Linux; explicit folder, write, shell, and macOS screenshot permissions |
-| MCP service | Rust/WASM, Streamable HTTP, 24 tools, bounded requests and responses |
+| MCP service | Rust/WASM, Streamable HTTP, 26 tools, bounded requests and responses |
 | Authorization | OAuth authorization code with PKCE S256, dynamic public client registration, exact redirect and resource validation, rotating refresh tokens |
 | Device access | Expiring pairing codes, owner approval, separate device credentials, connection replacement and revocation |
 | Dashboard | Cloudflare Access owner login; separate administrator credential held in tab memory; independent MFA temporarily deferred |
@@ -119,7 +119,7 @@ The dry run builds and bundles the Worker and validates Terraform. It does not c
 4. Select `commander:read`, `commander:write`, and `commander:execute` for the requested full access. Set them as base scopes as well if action-specific requests should always retain all three permissions.
 5. Sign in to the service and approve the request with your administrator key. The server pins the resulting OAuth token family. Another user cannot authorize a second family even with the same public OAuth client ID.
 
-The dashboard shows whether access is locked, linking is open, or one connection is approved. **Revoke client access** invalidates tokens and closes linking. **Replace ChatGPT connection** revokes the existing connection and opens a new window. Token refresh preserves the approved connection; a new authorization-code flow requires explicitly replacing it.
+The dashboard shows whether access is locked, linking is open, or one connection is approved. **Revoke client access** invalidates tokens and closes linking. **Replace ChatGPT connection** remains available for an explicit destructive reset, but ordinary ChatGPT Refresh/Reconnect does not require it. While a connection is pinned, a fresh DCR/authorization flow may reach the administrator-key consent page; successful code exchange atomically replaces and revokes the previous token family. Until that exchange succeeds, the existing connection remains usable.
 
 Production accepts the exact callback `https://chatgpt.com/connector_platform_oauth_redirect`, advertises RFC 9207 issuer identification, and includes `iss` in success and denial callbacks. Authorization uses PKCE S256 and the exact `/mcp` resource. Duplicate scope names are normalized because ChatGPT combines base and action/default scopes. See [OpenAI’s authentication contract](https://developers.openai.com/plugins/build/auth) and [ADR 004](docs/adr/004-private-chatgpt-connection.md).
 
@@ -136,6 +136,8 @@ npm run setup:macos -- --root "$HOME" --name "My Mac" --allow-write --allow-shel
 ```
 
 This pairs the Mac using your local owner key, installs the binary and private device credential under `~/Library/Application Support/Remote Commander/`, and starts `app.remote-commander.agent`. The LaunchAgent uses `RunAtLoad=true` and `KeepAlive=false`; network reconnection happens inside the running agent. Logs are private under `~/Library/Logs/Remote Commander/`. Re-running reuses the same device and updates the binary and arguments. Shell commands run with your OS user’s authority; home is their initial working directory, not a shell sandbox.
+
+With `--allow-shell`, installation resolves PATH from the OS account's interactive login shell (Bash or zsh), including the owner's normal startup files, and saves only that PATH in the LaunchAgent. This makes NVM/Homebrew/Cargo executables available without hardcoding a Node version or loading shell profiles for every command. Command syntax remains `/bin/sh -c`, and the selected working directory and permission flags are unchanged. Startup receives a minimal environment, has closed stdin and a 20-second deadline, and its output is not logged. Failure aborts before replacing the running agent. Re-run installation after changing the login shell or its PATH; aliases, shell functions and other profile variables are not imported. See [ADR 008](docs/adr/008-terminal-path.md).
 
 Inspect or stop it with:
 
@@ -191,3 +193,7 @@ Tool work runs independently of connection heartbeats. OS file operations and pr
 Requests are not automatically retried after a lost reply. A timeout or disconnect can mean the command executed but its result was lost: inspect the file or process state before repeating a change. Device reconnects preserve in-memory agent sessions while the agent remains running. They do not recover processes or search snapshots after an agent restart.
 
 The cloud service handles requested content in transit but does not persist tool arguments or results. Its bounded activity history stores tool names, device IDs, timestamps and outcomes. Cloudflare terminates TLS; this is not end-to-end encryption against the hosting account or operator. Read the [trust model](docs/SECURITY.md) before granting shell access.
+
+## Binary transfers
+
+Use `download_file` and `upload_file` for binary files up to **1 GiB (1,073,741,824 bytes)**. Downloads stream directly from the computer and support HTTP Range/resume. Uploads use a private browser page or chunked HTTP API, with SHA-256 verification, retries and atomic publication. Both links expire after one hour. See [File transfers](docs/FILE_TRANSFERS.md) for usage, security, limits and deployment.

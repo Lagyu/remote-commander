@@ -46,7 +46,12 @@ impl Commander {
         if authorization.epoch != epoch {
             return Err(invalid_grant());
         }
-        self.connection_open(config).await?;
+        if !self
+            .connection_authorization_matches(authorization.connection.as_ref(), config)
+            .await?
+        {
+            return Err(invalid_grant());
+        }
         require(
             !config.chatgpt_only || authorization.redirect_uri == CHATGPT_REDIRECT,
             "Only the exact ChatGPT OAuth callback is allowed",
@@ -120,7 +125,6 @@ impl Commander {
             .unwrap_or_default();
         let grant = match param(&values, "grant_type")? {
             "authorization_code" => {
-                self.connection_open(config).await?;
                 let key = format!("e:code:{}", hash(param(&values, "code")?));
                 let authorization = self
                     .get::<Authorization>(&key)
@@ -140,17 +144,22 @@ impl Commander {
                     || authorization.resource != config.resource()
                     || (config.chatgpt_only && authorization.redirect_uri != CHATGPT_REDIRECT)
                     || !secret_equal(&authorization.challenge, &hash(verifier))
+                    || !self
+                        .connection_authorization_matches(authorization.connection.as_ref(), config)
+                        .await?
                 {
                     return Err(invalid_grant());
                 }
                 self.state.storage().delete(&key).await?;
+                let expected_connection = authorization.connection.clone();
                 let grant = Grant {
                     client_id: client_id.into(),
                     scope: authorization.scope,
                     family: random()?,
                     epoch,
                 };
-                self.pin_connection(&grant, config).await?;
+                self.pin_connection(&grant, expected_connection.as_ref(), config)
+                    .await?;
                 grant
             }
             "refresh_token" => {

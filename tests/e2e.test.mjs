@@ -26,7 +26,7 @@ test('Rust agent → Cloudflare Durable Object → official MCP client', { timeo
     const discovery = await h.request('/.well-known/oauth-authorization-server');
     assert.deepEqual(discovery.data.code_challenge_methods_supported, ['S256']);
     const catalog = await client.listTools();
-    assert.equal(catalog.tools.length, 24);
+    assert.equal(catalog.tools.length, 26);
     assert.ok(catalog.tools.every((tool) => tool.inputSchema.additionalProperties === false));
     const screenshot = catalog.tools.find((tool) => tool.name === 'get_screenshot');
     assert.equal(screenshot.inputSchema.properties.display.default, 1);
@@ -66,6 +66,20 @@ test('Rust agent → Cloudflare Durable Object → official MCP client', { timeo
     assert.equal((await call(client, 'get_more_search_results', args({ search_id: search.search_id }))).results[0].line, 1);
     assert.equal((await call(client, 'list_searches', args())).searches.length, 1);
     assert.equal((await call(client, 'stop_search', args({ search_id: search.search_id }))).removed, true);
+
+    const largeBytes = Buffer.alloc(3 * 1024 * 1024 + 17, 0x5a);
+    writeFileSync(path.join(h.files, 'large.bin'), largeBytes);
+    await call(client, 'read_file', args({ path: 'large.bin' }), true);
+    const download = await client.callTool({ name: 'download_file', arguments: args({ path: 'large.bin' }) });
+    assert.notEqual(download.isError, true, JSON.stringify(download));
+    assert.equal(download.content[0].type, 'resource_link');
+    assert.equal(download.content[0].name, 'large.bin');
+    assert.equal(download.content[0].size, largeBytes.length);
+    const downloaded = await fetch(download.content[0].uri);
+    assert.equal(downloaded.status, 200);
+    assert.equal(downloaded.headers.get('content-length'), String(largeBytes.length));
+    assert.equal(downloaded.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()), largeBytes);
   });
 
   await t.test('Traversal, symlink escapes, special files, and malformed tool arguments fail safely', async () => {

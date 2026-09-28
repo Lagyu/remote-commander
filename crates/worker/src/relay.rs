@@ -6,7 +6,7 @@ use futures::{
 use rdc_protocol::{AgentResponse, Command, MAX_FRAME_BYTES, ToolResult};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::time::Duration;
+use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
 use worker::{Delay, Request, Response, WebSocket, WebSocketIncomingMessage, WebSocketPair};
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -102,19 +102,8 @@ impl Commander {
         Ok(Response::from_websocket(pair.client)?)
     }
 
-    pub async fn relay(
-        &self,
-        device_id: &str,
-        name: &str,
-        arguments: Value,
-    ) -> ApiResult<ToolResult> {
-        if self.pending.borrow().len() >= 8 {
-            return Ok(ToolResult::error(
-                "busy",
-                "At most eight tool calls may be in flight. No command was dispatched.",
-            ));
-        }
-        let socket = self
+    pub fn relay_client(&self, device_id: &str) -> ApiResult<RelayClient> {
+        let selected = self
             .state
             .get_websockets_with_tag(device_id)
             .into_iter()
@@ -129,44 +118,25 @@ impl Commander {
                     None
                 }
             });
-        let Some((socket, attachment)) = socket else {
-            return Ok(ToolResult::error(
-                "device_offline",
-                "Device agent is not connected. No command was dispatched.",
-            ));
-        };
-        let id = random()?;
-        let command = Command {
-            id: id.clone(),
-            name: name.into(),
-            arguments,
-        };
-        let (reply, response) = oneshot::channel();
-        self.pending.borrow_mut().insert(
-            id.clone(),
-            Pending {
-                device_id: device_id.into(),
-                generation: attachment.generation,
-                reply,
-            },
-        );
-        if socket.send(&command).is_err() {
-            self.pending.borrow_mut().remove(&id);
-            return Ok(ToolResult::error(
-                "dispatch_failed",
-                "Delivery failed. Check the device before retrying a change.",
-            ));
+        let (socket, attachment) = selected
+            .ok_or_else(|| ApiError::new(503, "device_offline", "Device agent is not connected"))?;
+        Ok(RelayClient {
+            socket,
+            attachment,
+            pending: self.pending.clone(),
+        })
+    }
+
+    pub async fn relay(
+        &self,
+        device_id: &str,
+        name: &str,
+        arguments: Value,
+    ) -> ApiResult<ToolResult> {
+        match self.relay_client(device_id) {
+            Ok(client) => client.call(name, arguments).await,
+            Err(error) => Ok(ToolResult::error(error.code, error.message)),
         }
-        let timeout = Box::pin(Delay::from(Duration::from_secs(25)));
-        let result = match select(response, timeout).await {
-            Either::Left((Ok(result), _)) => result,
-            _ => ToolResult::error(
-                "unknown_execution_state",
-                "No result arrived within 25 seconds. The command may have executed. Inspect state before retrying a write or process start.",
-            ),
-        };
-        self.pending.borrow_mut().remove(&id);
-        Ok(result)
     }
 
     pub fn receive_agent(
@@ -212,5 +182,77 @@ impl Commander {
             self.fail_pending(&attachment, code);
         }
         let _ = socket.close(Some(4002), Some("Connection ended"));
+    }
+}
+
+// Owned by a streaming response; no entire-file buffers or per-chunk HTTP subrequests.
+#[derive(Clone)]
+pub struct RelayClient {
+    socket: WebSocket,
+    attachment: Attachment,
+    pending: Rc<RefCell<HashMap<String, Pending>>>,
+}
+struct PendingGuard {
+    id: String,
+    pending: Rc<RefCell<HashMap<String, Pending>>>,
+}
+impl Drop for PendingGuard {
+    fn drop(&mut self) {
+        self.pending.borrow_mut().remove(&self.id);
+    }
+}
+impl RelayClient {
+    pub async fn call(&self, name: &str, arguments: Value) -> ApiResult<ToolResult> {
+        if self.pending.borrow().len() >= 8 {
+            return Ok(ToolResult::error(
+                "busy",
+                "At most eight tool calls may be in flight. No command was dispatched.",
+            ));
+        }
+        if !self
+            .socket
+            .deserialize_attachment::<Attachment>()?
+            .is_some_and(|a| a.active && a.generation == self.attachment.generation)
+        {
+            return Ok(ToolResult::error(
+                "device_offline",
+                "Device connection changed. Resume with a new HTTP request.",
+            ));
+        }
+        let id = random()?;
+        let command = Command {
+            id: id.clone(),
+            name: name.into(),
+            arguments,
+        };
+        let (reply, response) = oneshot::channel();
+        self.pending.borrow_mut().insert(
+            id.clone(),
+            Pending {
+                device_id: self.attachment.device_id.clone(),
+                generation: self.attachment.generation.clone(),
+                reply,
+            },
+        );
+        // Remove the request even if a client cancels a partially read response.
+        let _guard = PendingGuard {
+            id,
+            pending: self.pending.clone(),
+        };
+        if self.socket.send(&command).is_err() {
+            return Ok(ToolResult::error(
+                "dispatch_failed",
+                "Delivery failed. Inspect transfer status before retrying a change.",
+            ));
+        }
+        let timeout = Box::pin(Delay::from(Duration::from_secs(25)));
+        let result = match select(response, timeout).await {
+            Either::Left((Ok(result), _)) => result,
+            _ => ToolResult::error(
+                "unknown_execution_state",
+                "No result arrived within 25 seconds. The command may have executed. Inspect state before retrying a change.",
+            ),
+        };
+        Ok(result)
     }
 }

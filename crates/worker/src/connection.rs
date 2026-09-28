@@ -1,5 +1,10 @@
 use crate::{
-    Commander, common::*, config::Config, crypto::random, oauth::Grant, storage::Expiring,
+    Commander,
+    common::*,
+    config::Config,
+    crypto::random,
+    oauth::{Grant, REFRESH_TTL},
+    storage::Expiring,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -11,6 +16,12 @@ pub const CHATGPT_REDIRECT: &str = "https://chatgpt.com/connector_platform_oauth
 const CONNECTION: &str = "p:chatgpt_connection";
 const WINDOW: &str = "e:chatgpt_link_window";
 
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ConnectionMarker {
+    pub client_id: String,
+    pub family: String,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Connection {
     client_id: String,
@@ -20,22 +31,23 @@ pub struct Connection {
 }
 
 impl Commander {
-    pub async fn connection_open(&self, config: &Config) -> ApiResult<()> {
+    // Initial ChatGPT linking is owner-window gated. Once one connection is
+    // pinned, a fresh authorization may reach the administrator-key consent
+    // page so ChatGPT's reconnect/refresh flow can replace it without a
+    // destructive dashboard reset. The returned marker is persisted with the
+    // authorization and compared again at approval and token exchange.
+    pub async fn connection_authorization_context(
+        &self,
+        config: &Config,
+    ) -> ApiResult<Option<ConnectionMarker>> {
         if !config.chatgpt_only {
-            return Ok(());
+            return Ok(None);
         }
-        if self
-            .state
-            .storage()
-            .get::<Connection>(CONNECTION)
-            .await?
-            .is_some()
-        {
-            return Err(ApiError::new(
-                403,
-                "connection_locked",
-                "A ChatGPT connection is already approved. Reset access in the owner dashboard to link again.",
-            ));
+        if let Some(connection) = self.state.storage().get::<Connection>(CONNECTION).await? {
+            return Ok(Some(ConnectionMarker {
+                client_id: connection.client_id,
+                family: connection.family,
+            }));
         }
         if !self.get::<bool>(WINDOW).await?.unwrap_or(false) {
             return Err(ApiError::new(
@@ -44,14 +56,53 @@ impl Commander {
                 "Open a ten-minute ChatGPT linking window in the owner dashboard first.",
             ));
         }
-        Ok(())
+        Ok(None)
     }
 
-    pub async fn pin_connection(&self, grant: &Grant, config: &Config) -> ApiResult<()> {
+    pub async fn connection_authorization_matches(
+        &self,
+        expected: Option<&ConnectionMarker>,
+        config: &Config,
+    ) -> ApiResult<bool> {
+        if !config.chatgpt_only {
+            return Ok(true);
+        }
+        let current = self.state.storage().get::<Connection>(CONNECTION).await?;
+        match (expected, current) {
+            (Some(expected), Some(current)) => {
+                Ok(expected.client_id == current.client_id && expected.family == current.family)
+            }
+            (None, None) => Ok(self.get::<bool>(WINDOW).await?.unwrap_or(false)),
+            _ => Ok(false),
+        }
+    }
+
+    pub async fn pin_connection(
+        &self,
+        grant: &Grant,
+        expected: Option<&ConnectionMarker>,
+        config: &Config,
+    ) -> ApiResult<()> {
         if !config.chatgpt_only {
             return Ok(());
         }
-        self.connection_open(config).await?;
+        if !self
+            .connection_authorization_matches(expected, config)
+            .await?
+        {
+            return Err(ApiError::new(
+                400,
+                "invalid_grant",
+                "The ChatGPT connection changed while authorization was pending",
+            ));
+        }
+        if let Some(previous) = expected {
+            // Invalidate the old family before publishing the replacement pin.
+            // The mutation gate serializes token exchange, so two replacement
+            // codes created from the same old connection cannot both succeed.
+            self.put(&format!("e:family:{}", previous.family), true, REFRESH_TTL)
+                .await?;
+        }
         self.state
             .storage()
             .put(
@@ -65,7 +116,16 @@ impl Commander {
             )
             .await?;
         self.state.storage().delete(WINDOW).await?;
-        self.audit("chatgpt_connected", None, "success").await?;
+        self.audit(
+            if expected.is_some() {
+                "chatgpt_reconnected"
+            } else {
+                "chatgpt_connected"
+            },
+            None,
+            "success",
+        )
+        .await?;
         Ok(())
     }
 

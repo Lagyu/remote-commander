@@ -97,7 +97,7 @@ async function refresh() {
 $('login-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const button = event.submitter; button.disabled = true;
-  credential = $('admin-key').value;
+  credential = $('admin-key').value.trim();
   try {
     await refresh();
     $('admin-key').value = '';

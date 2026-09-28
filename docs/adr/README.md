@@ -9,5 +9,6 @@
 | [005 — Private administration with Cloudflare Access](005-private-administration.md) | Accepted; MFA amended by 007 | 2026-09-20 |
 | [006 — Responsive agent operations during OS permission waits](006-responsive-agent-operations.md) | Accepted | 2026-09-20 |
 | [007 — Defer administration MFA while preserving owner access controls](007-defer-admin-mfa.md) | Accepted | 2026-09-21 |
+| [008 — Resolve terminal PATH at Mac installation](008-terminal-path.md) | Implemented | 2026-09-25 |
 
 Change a decision by adding a superseding ADR and updating this index. Preserve earlier reasoning and validation history.

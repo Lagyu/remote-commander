@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-pub const MAX_FRAME_BYTES: usize = 512 * 1024;
+// One base64-encoded 1 MiB binary chunk plus metadata, never an entire file.
+pub const MAX_FRAME_BYTES: usize = 2 * 1024 * 1024;
+pub const MAX_TRANSFER_BYTES: u64 = 1024 * 1024 * 1024;
+pub const TRANSFER_CHUNK_BYTES: usize = 1024 * 1024;
+pub const TRANSFER_TTL_SECONDS: u64 = 3600;
 pub const MAX_REQUEST_BYTES: usize = 192 * 1024;
 pub const READ_LIMIT: usize = 32 * 1024;
 pub const WRITE_LIMIT: usize = 64 * 1024;
@@ -33,6 +37,15 @@ pub enum ToolContent {
         data: String,
         #[serde(rename = "mimeType")]
         mime_type: String,
+    },
+    #[serde(rename = "resource_link")]
+    ResourceLink {
+        uri: String,
+        name: String,
+        #[serde(rename = "mimeType", skip_serializing_if = "Option::is_none")]
+        mime_type: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        size: Option<u64>,
     },
 }
 
@@ -67,6 +80,25 @@ impl ToolResult {
         }
     }
 
+    pub fn resource_link(
+        uri: String,
+        name: String,
+        mime_type: Option<String>,
+        size: Option<u64>,
+        metadata: Value,
+    ) -> Self {
+        Self {
+            content: vec![ToolContent::ResourceLink {
+                uri,
+                name,
+                mime_type,
+                size,
+            }],
+            is_error: false,
+            structured_content: Some(metadata),
+        }
+    }
+
     pub fn error(code: &str, message: impl ToString) -> Self {
         let mut result = Self::ok(json!({"error": code, "message": message.to_string()}));
         result.is_error = true;
@@ -86,11 +118,14 @@ pub fn scope_for(name: &str) -> Option<&'static str> {
         | "read_file"
         | "read_multiple_files"
         | "get_file_info"
+        | "download_file"
         | "start_search"
         | "get_more_search_results"
         | "stop_search"
         | "list_searches" => Some(SCOPES[0]),
-        "write_file" | "edit_block" | "create_directory" | "move_file" => Some(SCOPES[1]),
+        "upload_file" | "write_file" | "edit_block" | "create_directory" | "move_file" => {
+            Some(SCOPES[1])
+        }
         "start_process"
         | "read_process_output"
         | "interact_with_process"
@@ -199,6 +234,20 @@ pub fn tool_definitions() -> Vec<Value> {
         "Read file type, byte length, and modification time within the configured root.",
         json!({"path":path()}),
         &["path"],
+        true,
+    );
+    add(
+        "download_file",
+        "Create a one-hour streaming download link for a regular binary or text file up to 1 GiB (1073741824 bytes). Supports HTTP Range/resume. The device must stay online; anyone holding the link can read this file until expiry.",
+        json!({"path":path()}),
+        &["path"],
+        true,
+    );
+    add(
+        "upload_file",
+        "Create a one-hour upload link for a binary or text file up to 1 GiB (1073741824 bytes). Open the link to choose a local file, or use its chunked HTTP API. size is the exact byte length. Requires local --allow-write; existing files are preserved unless overwrite is explicitly true. Optional sha256 verifies the entire file before atomic publication. Anyone holding the link can upload only to this destination until expiry.",
+        json!({"path":path(),"size":{"type":"integer","minimum":0,"maximum":MAX_TRANSFER_BYTES},"overwrite":{"type":"boolean","default":false},"sha256":{"type":"string","description":"Optional expected SHA-256: exactly 64 hexadecimal characters."}}),
+        &["path", "size"],
         true,
     );
     add(
@@ -330,5 +379,21 @@ mod tests {
         assert_eq!(value["content"][0]["mimeType"], "image/jpeg");
         assert_eq!(value["structuredContent"]["bytes"], 3);
         assert!(value["structuredContent"].get("data").is_none());
+    }
+
+    #[test]
+    fn resource_link_results_use_mcp_resource_link_content() {
+        let result = ToolResult::resource_link(
+            "https://example.test/download/token/file.bin".into(),
+            "file.bin".into(),
+            Some("application/octet-stream".into()),
+            Some(42),
+            json!({"bytes":42,"expires_in":600}),
+        );
+        let value = serde_json::to_value(result).unwrap();
+        assert_eq!(value["content"][0]["type"], "resource_link");
+        assert_eq!(value["content"][0]["name"], "file.bin");
+        assert_eq!(value["content"][0]["size"], 42);
+        assert_eq!(value["structuredContent"]["expires_in"], 600);
     }
 }

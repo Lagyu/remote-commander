@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail, ensure};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use cap_std::{
     ambient_authority,
     fs::{Dir, OpenOptions},
@@ -8,13 +9,14 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
-    io::{Read, Write},
+    io::{Read, Seek, SeekFrom, Write},
     path::{Component, Path, PathBuf},
     sync::Mutex,
     time::{Duration, Instant, UNIX_EPOCH},
 };
 
 const MAX_FILE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_DOWNLOAD_CHUNK_BYTES: usize = 256 * 1024;
 const MAX_ENTRIES: usize = 2_000;
 
 pub struct FileTools {
@@ -22,6 +24,7 @@ pub struct FileTools {
     pub root: PathBuf,
     pub allow_write: bool,
     searches: Mutex<BTreeMap<String, Search>>,
+    pub transfers: crate::transfers::TransferTools,
 }
 
 struct Search {
@@ -46,6 +49,13 @@ struct ReadArgs {
 }
 fn default_lines() -> usize {
     200
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DownloadChunkArgs {
+    path: String,
+    offset: u64,
+    length: usize,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -138,9 +148,11 @@ impl FileTools {
             .canonicalize()
             .context("root must be an existing directory")?;
         let dir = Dir::open_ambient_dir(&root, ambient_authority())?;
+        let transfers = crate::transfers::TransferTools::new(dir.try_clone()?, allow_write);
         Ok(Self {
             dir,
             root,
+            transfers,
             allow_write,
             searches: Mutex::new(BTreeMap::new()),
         })
@@ -180,6 +192,50 @@ impl FileTools {
             "file grew beyond the text-tool limit"
         );
         String::from_utf8(bytes).context("file is not UTF-8 text")
+    }
+
+    fn download_chunk(&self, args: DownloadChunkArgs) -> Result<Value> {
+        ensure!(
+            args.length > 0 && args.length <= MAX_DOWNLOAD_CHUNK_BYTES,
+            "download chunk length must be 1–256 KiB"
+        );
+        let path = relative(&args.path)?;
+        let entry = self.dir.symlink_metadata(path)?;
+        ensure!(
+            entry.is_file() && !entry.file_type().is_symlink(),
+            "expected a regular file"
+        );
+        let mut options = OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use cap_std::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NONBLOCK);
+        }
+        let mut file = self
+            .dir
+            .open_with(path, &options)
+            .context("cannot open file within root")?;
+        let meta = file.metadata()?;
+        ensure!(meta.is_file(), "expected a regular file");
+        ensure!(
+            args.offset <= meta.len(),
+            "download offset exceeds file size"
+        );
+        file.seek(SeekFrom::Start(args.offset))?;
+        let mut bytes = Vec::with_capacity(args.length);
+        (&mut file)
+            .take(args.length as u64)
+            .read_to_end(&mut bytes)?;
+        let next = args.offset + bytes.len() as u64;
+        Ok(json!({
+            "path": args.path,
+            "offset": args.offset,
+            "size": meta.len(),
+            "bytes": bytes.len(),
+            "data": STANDARD.encode(&bytes),
+            "next_offset": if next < meta.len() { Some(next) } else { None },
+        }))
     }
 
     fn read(&self, args: ReadArgs, limit: usize) -> Result<Value> {
@@ -342,6 +398,9 @@ impl FileTools {
     }
 
     pub fn execute(&self, name: &str, arguments: Value) -> Result<Value> {
+        if crate::transfers::internal_tool(name) {
+            return self.transfers.execute(name, arguments);
+        }
         if rdc_protocol::scope_for(name) == Some(rdc_protocol::SCOPES[1]) {
             ensure!(
                 self.allow_write,
@@ -359,6 +418,7 @@ impl FileTools {
                 )
             }
             "read_file" => self.read(serde_json::from_value(arguments)?, READ_LIMIT),
+            "download_file_chunk" => self.download_chunk(serde_json::from_value(arguments)?),
             "read_multiple_files" => {
                 let args: MultipleArgs = serde_json::from_value(arguments)?;
                 ensure!(

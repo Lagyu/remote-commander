@@ -6,6 +6,10 @@ use worker::{Context, Env, Method, Request, Url, wasm_bindgen::JsCast};
 
 fn protocol_request(req: &Request) -> bool {
     let path = req.path();
+    // Transfer routes authenticate using a short-lived, destination-scoped capability.
+    if crate::downloads::is_transfer_request(req) {
+        return true;
+    }
     match req.method() {
         Method::Get => {
             matches!(
@@ -18,6 +22,11 @@ fn protocol_request(req: &Request) -> bool {
             ) || path.strip_prefix("/agent/").is_some_and(|id| {
                 id.len() == 43
                     && id
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+            }) || path.strip_prefix("/download/").is_some_and(|token| {
+                token.len() == 43
+                    && token
                         .bytes()
                         .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
             })

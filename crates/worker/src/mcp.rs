@@ -124,7 +124,7 @@ impl Commander {
                 if !params["capabilities"].is_object() || !params["clientInfo"].is_object() {
                     return rpc_error(id, -32602, "clientInfo and capabilities are required");
                 }
-                json!({"protocolVersion":if VERSIONS.contains(&version) { version } else { rdc_protocol::PROTOCOL_VERSION },"capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"remote-commander","version":env!("CARGO_PKG_VERSION")},"instructions":"Use list_devices to select a paired computer. File paths are relative to its configured root. Writes and shell access must also be enabled locally. After a lost reply, inspect state before repeating a change."})
+                json!({"protocolVersion":if VERSIONS.contains(&version) { version } else { rdc_protocol::PROTOCOL_VERSION },"capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"remote-commander","version":env!("CARGO_PKG_VERSION")},"instructions":"Use list_devices to select a paired computer. Paths are relative to its configured root. For binary or large files up to 1 GiB, use download_file or upload_file rather than text read/write tools. Return the private transfer URL to the user; never embed file bytes in tool arguments. Uploads require exact size and local --allow-write. Transfer links expire after one hour; keep the device online. Shell access also requires local permission. After a lost reply, inspect state before repeating a change."})
             }
             "ping" => json!({}),
             "tools/list" => json!({"tools":tool_definitions()}),
@@ -181,7 +181,12 @@ impl Commander {
                                 ToolResult::ok(self.public_device(&device))
                             } else {
                                 arguments.as_object_mut().unwrap().remove("device_id");
-                                self.relay(device_id, name, arguments).await?
+                                if name == "download_file" || name == "upload_file" {
+                                    self.create_transfer(device_id, name, arguments, config)
+                                        .await?
+                                } else {
+                                    self.relay(device_id, name, arguments).await?
+                                }
                             }
                         } else {
                             ToolResult::error(

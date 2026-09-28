@@ -96,7 +96,9 @@ locals {
   protocol_paths = toset([
     "mcp", ".well-known/oauth-protected-resource",
     ".well-known/oauth-authorization-server", "oauth/register", "oauth/token",
-    "oauth/revoke", "agent/*", "pair/start", "pair/token", "health"
+    "oauth/revoke", "agent/*", "pair/start", "pair/token", "health",
+    # Transfer handlers require a one-hour, single-file capability token.
+    "download/*", "upload/*", "transfer.js", "transfer.css"
   ])
 }
 

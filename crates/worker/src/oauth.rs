@@ -2,7 +2,7 @@ use crate::{
     Commander,
     common::*,
     config::{Config, bearer},
-    connection::CHATGPT_REDIRECT,
+    connection::{CHATGPT_REDIRECT, ConnectionMarker},
     crypto::*,
     storage::Expiring,
 };
@@ -29,6 +29,8 @@ pub struct Authorization {
     pub resource: String,
     #[serde(default)]
     pub epoch: String,
+    #[serde(default)]
+    pub connection: Option<ConnectionMarker>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -68,7 +70,10 @@ pub fn metadata(config: &Config, resource: bool) -> ApiResult<Response> {
 impl Commander {
     pub async fn register_client(&self, req: &mut Request, config: &Config) -> ApiResult<Response> {
         self.rate("register", 10).await?;
-        self.connection_open(config).await?;
+        // Registration is allowed while an owner-approved connection is pinned so
+        // ChatGPT's reconnect flow can obtain a fresh public client ID. Initial
+        // linking still requires the owner-opened ten-minute window.
+        self.connection_authorization_context(config).await?;
         let value: Value = json_body(req).await?;
         let redirects = value["redirect_uris"]
             .as_array()
@@ -131,7 +136,7 @@ impl Commander {
 
     pub async fn authorize(&self, req: &Request, config: &Config) -> ApiResult<Response> {
         self.rate("authorize", 20).await?;
-        self.connection_open(config).await?;
+        let connection = self.connection_authorization_context(config).await?;
         let mut query = BTreeMap::new();
         for (key, value) in req.url()?.query_pairs() {
             require(
@@ -206,6 +211,7 @@ impl Commander {
                 .get("p:auth_epoch")
                 .await?
                 .unwrap_or_default(),
+            connection,
         };
         let ticket = random()?;
         self.put(&format!("e:consent:{}", hash(&ticket)), &authorization, 300)

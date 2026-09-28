@@ -29,7 +29,7 @@ export function isAlive(pid) {
   catch (error) { return error.code === 'EPERM'; }
 }
 
-export async function harness({ chatgptOnly = false, access } = {}) {
+export async function harness({ chatgptOnly = false, access, agentBinary } = {}) {
   process.umask(0o077);
   mkdirSync(path.join(root, '.local'), { recursive: true, mode: 0o700 });
   const directory = mkdtempSync(path.join(root, '.local/e2e-'));
@@ -169,7 +169,7 @@ export async function harness({ chatgptOnly = false, access } = {}) {
   }
 
   function agent(configPath, permissions = []) {
-    return launch('agent', path.join(root, 'target/debug/remote-commander'), ['run', '--config', configPath, '--root', files, '--insecure-localhost', ...permissions]);
+    return launch('agent', agentBinary ?? path.join(root, 'target/debug/remote-commander'), ['run', '--config', configPath, '--root', files, '--insecure-localhost', ...permissions]);
   }
 
   async function startAgent(device, permissions = ['--allow-write', '--allow-shell', '--allow-screenshot']) {

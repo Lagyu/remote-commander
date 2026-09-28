@@ -79,15 +79,19 @@ pub async fn body(req: &mut Request, content_type: &str) -> ApiResult<Vec<u8>> {
 }
 
 pub async fn bounded_bytes(req: &mut Request) -> ApiResult<Vec<u8>> {
+    bounded_bytes_limit(req, rdc_protocol::MAX_REQUEST_BYTES).await
+}
+
+pub async fn bounded_bytes_limit(req: &mut Request, limit: usize) -> ApiResult<Vec<u8>> {
     if let Some(length) = req.headers().get("Content-Length")? {
         let length = length
             .parse::<usize>()
             .map_err(|_| ApiError::bad("Invalid Content-Length"))?;
-        if length > rdc_protocol::MAX_REQUEST_BYTES {
+        if length > limit {
             return Err(ApiError::new(
                 413,
                 "request_too_large",
-                "Request exceeds 192 KiB",
+                format!("Request exceeds {limit} bytes"),
             ));
         }
     }
@@ -99,24 +103,29 @@ pub async fn bounded_bytes(req: &mut Request) -> ApiResult<Vec<u8>> {
         let mut stream = req.stream()?;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
-            if bytes.len() + chunk.len() > rdc_protocol::MAX_REQUEST_BYTES {
+            if bytes.len() + chunk.len() > limit {
                 return Err(ApiError::new(
                     413,
                     "request_too_large",
-                    "Request exceeds 192 KiB",
+                    format!("Request exceeds {limit} bytes"),
                 ));
             }
             bytes.extend_from_slice(&chunk);
         }
         Ok(bytes)
     };
-    let deadline = worker::Delay::from(std::time::Duration::from_secs(5));
+    let seconds = if limit == rdc_protocol::TRANSFER_CHUNK_BYTES {
+        60
+    } else {
+        5
+    };
+    let deadline = worker::Delay::from(std::time::Duration::from_secs(seconds));
     match futures::future::select(Box::pin(receive), Box::pin(deadline)).await {
         futures::future::Either::Left((result, _)) => result,
         futures::future::Either::Right(_) => Err(ApiError::new(
             408,
             "request_timeout",
-            "Request body must arrive within five seconds",
+            format!("Request body must arrive within {seconds} seconds"),
         )),
     }
 }

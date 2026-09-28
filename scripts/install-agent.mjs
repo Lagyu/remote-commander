@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, copyFileSync, renameSync, chmodSync, writeFileSy
 import path from 'node:path';
 import { loadDeploymentEnv, projectRoot, readPrivateFile } from './deployment-env.mjs';
 import { ownerAccessHeaders } from './owner-access.mjs';
+import { BOOTSTRAP_PATH, resolveTerminalPath } from './terminal-path.mjs';
 
 process.umask(0o077);
 const label = 'app.remote-commander.agent';
@@ -22,6 +23,8 @@ async function main() {
   if (!values.root) throw new Error('--root is required. Pass --root "$HOME" to expose your home directory.');
   const root = realpathSync(values.root);
   if (!statSync(root).isDirectory()) throw new Error('--root must be a directory.');
+  // Resolve before pairing, replacing files or stopping the current agent.
+  const terminal = values['allow-shell'] ? await resolveTerminalPath() : { shell: null, path: BOOTSTRAP_PATH };
   const origin = new URL(process.env.REMOTE_COMMANDER_PUBLIC_URL);
   if (origin.protocol !== 'https:' || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) throw new Error('The deployment URL must be an HTTPS origin.');
   const adminFile = path.resolve(projectRoot, process.env.REMOTE_COMMANDER_ADMIN_SECRET_FILE ?? '.deploy/admin.key');
@@ -84,7 +87,7 @@ async function main() {
 <key>ProcessType</key><string>Background</string>
 <key>ExitTimeOut</key><integer>15</integer>
 <key>Umask</key><integer>63</integer>
-<key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+<key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(terminal.path)}</string></dict>
 <key>StandardOutPath</key><string>${xml(stdout)}</string>
 <key>StandardErrorPath</key><string>${xml(stderr)}</string>
 </dict></plist>\n`;
@@ -114,6 +117,7 @@ async function main() {
     if (/state = running/.test(status.stdout) && directory.devices.some((d) => d.device_id === device.device_id && d.online)) {
       const report = { service, root, allow_write: values['allow-write'], allow_shell: values['allow-shell'],
         allow_screenshot: values['allow-screenshot'],
+        path_source: terminal.shell ? 'interactive-login-shell' : 'bootstrap', login_shell: terminal.shell,
         pid: Number(status.stdout.match(/\bpid = (\d+)/)?.[1]), device_id: device.device_id,
         checked_at: new Date().toISOString(), online: true, keep_alive: false };
       writeFileSync(path.join(directoryPath(), 'agent-installation.json'), `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });

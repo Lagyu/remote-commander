@@ -2,6 +2,7 @@ mod blocking;
 mod files;
 mod processes;
 mod screenshots;
+mod transfers;
 
 #[cfg(not(unix))]
 compile_error!(
@@ -289,7 +290,7 @@ impl Tools {
         }
         let result = match command.name.as_str() {
             "get_config" => Ok(
-                json!({"root":self.files.root,"allow_write":self.files.allow_write,"allow_shell":self.processes.enabled,"allow_screenshot":self.screenshots.enabled,"read_limit":READ_LIMIT,"write_limit":WRITE_LIMIT,"max_processes":8,"max_process_lifetime_ms":300000,"shell_is_sandboxed":false}),
+                json!({"root":self.files.root,"allow_write":self.files.allow_write,"allow_shell":self.processes.enabled,"allow_screenshot":self.screenshots.enabled,"read_limit":READ_LIMIT,"write_limit":WRITE_LIMIT,"max_processes":8,"max_process_lifetime_ms":300000,"shell_is_sandboxed":false,"max_transfer_bytes":rdc_protocol::MAX_TRANSFER_BYTES,"transfer_chunk_bytes":rdc_protocol::TRANSFER_CHUNK_BYTES,"transfer_ttl_seconds":rdc_protocol::TRANSFER_TTL_SECONDS}),
             ),
             "shutdown_device" => Ok(json!({"stopping":true})),
             "ping_device" => Ok(json!({"ok":true,"platform":std::env::consts::OS})),
@@ -308,7 +309,16 @@ impl Tools {
             }
         };
         match result {
-            Ok(value) => ToolResult::ok(value),
+            Ok(value) => {
+                let mut result = ToolResult::ok(value);
+                // Internal binary replies must not duplicate base64 into text content.
+                if command.name == "transfer_download_chunk"
+                    || command.name == "download_file_chunk"
+                {
+                    result.content.clear();
+                }
+                result
+            }
             Err(error) => ToolResult::error("operation_failed", error),
         }
     }
@@ -410,7 +420,10 @@ async fn run_agent(config: &DeviceConfig, tools: &Tools, insecure: bool) -> Resu
                                 continue;
                             }
                             // Log only catalog names, never arguments, paths or output.
-                            if rdc_protocol::scope_for(&command.name).is_none() {
+                            if rdc_protocol::scope_for(&command.name).is_none()
+                                && command.name != "download_file_chunk"
+                                && !transfers::internal_tool(&command.name)
+                            {
                                 let result = ToolResult::error("unknown_tool", "Unknown agent tool");
                                 if socket.send(Message::Text(encode_response(command.id, result)?.into())).await.is_err() { break; }
                                 continue;
@@ -506,6 +519,17 @@ async fn async_main() -> Result<()> {
         } => {
             let config = load_config(&config)?;
             let files = Arc::new(files::FileTools::new(&root, allow_write)?);
+            let maintenance_files = Arc::downgrade(&files);
+            let maintenance = tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(60));
+                loop {
+                    interval.tick().await;
+                    let Some(files) = maintenance_files.upgrade() else {
+                        break;
+                    };
+                    let _ = tokio::task::spawn_blocking(move || files.transfers.cleanup()).await;
+                }
+            });
             let tools = Tools {
                 processes: processes::ProcessTools::new(files.root.clone(), allow_shell)?,
                 screenshots: Arc::new(screenshots::ScreenshotTools::new(allow_screenshot)),
@@ -516,6 +540,7 @@ async fn async_main() -> Result<()> {
                 result = run_agent(&config, &tools, insecure_localhost) => result,
                 _ = shutdown_signal() => Ok(()),
             };
+            maintenance.abort();
             tools.processes.shutdown().await;
             eprintln!("Device stopped; child processes cleaned up.");
             result

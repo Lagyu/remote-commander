@@ -47,7 +47,7 @@ test('Access protects administration without interrupting an existing ChatGPT an
     const refreshed = await h.request('/oauth/token', { form: { grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: tokens.clientId, resource: `${h.origin}/mcp` } });
     assert.equal(refreshed.response.status, 200);
     const client = await h.sdk(refreshed.data);
-    assert.equal((await client.listTools()).tools.length, 24);
+    assert.equal((await client.listTools()).tools.length, 26);
     const config = await until(async () => {
       try { return await call(client, 'get_config', { device_id: device.device_id }); } catch { return false; }
     }, 'agent reconnect through public authenticated WebSocket');
@@ -55,6 +55,23 @@ test('Access protects administration without interrupting an existing ChatGPT an
     await call(client, 'write_file', { device_id: device.device_id, path: 'access-test.txt', content: 'access-test-ok' });
     assert.equal(readFileSync(path.join(h.files, 'access-test.txt'), 'utf8'), 'access-test-ok');
     assert.equal((await call(client, 'read_file', { device_id: device.device_id, path: 'access-test.txt' })).content, 'access-test-ok');
+    const download = await client.callTool({ name: 'download_file', arguments: { device_id: device.device_id, path: 'access-test.txt' } });
+    assert.notEqual(download.isError, true, JSON.stringify(download));
+    assert.equal(download.content[0].type, 'resource_link');
+    const downloaded = await fetch(download.content[0].uri);
+    assert.equal(downloaded.status, 200);
+    assert.equal(await downloaded.text(), 'access-test-ok');
+    const upload = await call(client, 'upload_file', { device_id: device.device_id, path: 'access-upload.bin', size: 3 });
+    assert.equal((await fetch(upload.upload_url)).status, 200);
+    assert.equal((await fetch(`${h.origin}/transfer.js`)).status, 200);
+    assert.equal((await fetch(`${h.origin}/transfer.css`)).status, 200);
+    assert.equal((await fetch(`${h.origin}/upload/${'z'.repeat(43)}`)).status, 404);
+    const chunk = await fetch(`${upload.upload_url}/chunk?offset=0`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: Buffer.from([0,255,128]) });
+    assert.equal(chunk.status, 200);
+    assert.equal((await fetch(`${upload.upload_url}/complete`, { method: 'POST' })).status, 200);
+    assert.deepEqual(readFileSync(path.join(h.files, 'access-upload.bin')), Buffer.from([0,255,128]));
+    assert.equal((await fetch(upload.upload_url, { method: 'DELETE' })).status, 200);
+    assert.equal((await fetch(download.content[0].uri, { method: 'DELETE' })).status, 200);
     const process = await call(client, 'start_process', { device_id: device.device_id, command: "printf 'access-shell-ok'", timeout_ms: 3000 });
     const output = await until(async () => {
       const result = await call(client, 'read_process_output', { device_id: device.device_id, session_id: process.session_id });

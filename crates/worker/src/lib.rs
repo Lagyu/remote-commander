@@ -3,6 +3,7 @@ mod common;
 mod config;
 mod connection;
 mod crypto;
+mod downloads;
 mod mcp;
 mod oauth;
 mod oauth_tokens;
@@ -13,7 +14,7 @@ mod storage;
 use common::*;
 use config::Config;
 use futures::lock::Mutex;
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use worker::*;
 
 #[event(fetch)]
@@ -38,7 +39,12 @@ async fn main(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
     // stream permits an early DO rejection to outlive the source Fetch event.
     // Receiving here also keeps slow uploads outside the authorization lock.
     if req.inner().body().is_some() {
-        let bytes = match bounded_bytes(&mut req).await {
+        let limit = if downloads::is_upload_chunk(&req) {
+            rdc_protocol::TRANSFER_CHUNK_BYTES
+        } else {
+            rdc_protocol::MAX_REQUEST_BYTES
+        };
+        let bytes = match bounded_bytes_limit(&mut req, limit).await {
             Ok(bytes) => bytes,
             Err(error) => {
                 let mut response = error.response()?;
@@ -70,7 +76,7 @@ pub struct Commander {
     state: State,
     env: Env,
     gate: Mutex<()>,
-    pending: RefCell<HashMap<String, relay::Pending>>,
+    pending: Rc<RefCell<HashMap<String, relay::Pending>>>,
 }
 
 impl Commander {
@@ -116,7 +122,7 @@ impl Commander {
                 }
                 "/health" => {
                     return json(
-                        &serde_json::json!({"ok":true,"service":"remote-commander","version":env!("CARGO_PKG_VERSION")}),
+                        &serde_json::json!({"ok":true,"service":"remote-commander","version":env!("CARGO_PKG_VERSION"),"file_transfers":{"max_bytes":rdc_protocol::MAX_TRANSFER_BYTES,"chunk_bytes":rdc_protocol::TRANSFER_CHUNK_BYTES,"expires_in":rdc_protocol::TRANSFER_TTL_SECONDS}}),
                     );
                 }
                 "/.well-known/oauth-protected-resource"
@@ -126,6 +132,9 @@ impl Commander {
                 "/.well-known/oauth-authorization-server" => return oauth::metadata(config, false),
                 _ => {}
             }
+        }
+        if downloads::is_transfer_request(req) {
+            return self.transfer_route(req).await;
         }
         let _guard = self.gate.lock().await;
         if path.starts_with("/api/") {
@@ -153,7 +162,7 @@ impl DurableObject for Commander {
             state,
             env,
             gate: Mutex::new(()),
-            pending: RefCell::new(HashMap::new()),
+            pending: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
