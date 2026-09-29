@@ -64,9 +64,12 @@ enum Action {
         /// Grants shell commands the OS user's full authority; root is NOT a shell sandbox.
         #[arg(long)]
         allow_shell: bool,
-        /// Allows reading the visible contents of a macOS display.
-        #[arg(long)]
+        /// Legacy compatibility flag; screenshots are enabled by default.
+        #[arg(long, hide = true)]
         allow_screenshot: bool,
+        /// Disables reading the visible contents of a macOS display.
+        #[arg(long)]
+        no_screenshot: bool,
         #[arg(long)]
         insecure_localhost: bool,
     },
@@ -515,8 +518,14 @@ async fn async_main() -> Result<()> {
             allow_write,
             allow_shell,
             allow_screenshot,
+            no_screenshot,
             insecure_localhost,
         } => {
+            ensure!(
+                !(allow_screenshot && no_screenshot),
+                "--allow-screenshot and --no-screenshot cannot be used together"
+            );
+            let allow_screenshot = !no_screenshot;
             let config = load_config(&config)?;
             let files = Arc::new(files::FileTools::new(&root, allow_write)?);
             let maintenance_files = Arc::downgrade(&files);

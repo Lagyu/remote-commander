@@ -63,7 +63,7 @@ impl ScreenshotTools {
     pub fn capture(&self, arguments: Value) -> Result<Screenshot> {
         ensure!(
             self.enabled,
-            "screen capture is disabled; restart the agent with --allow-screenshot to enable it"
+            "screen capture is disabled; restart the agent without --no-screenshot to enable it"
         );
         let args: ScreenshotArgs = serde_json::from_value(arguments)?;
         ensure!(
@@ -220,10 +220,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn capture_requires_explicit_local_permission() {
+    fn capture_respects_local_opt_out() {
         let tools = ScreenshotTools::new(false);
         let error = tools.capture(json!({})).unwrap_err();
-        assert!(error.to_string().contains("--allow-screenshot"));
+        assert!(error.to_string().contains("--no-screenshot"));
     }
 
     #[test]

@@ -19,7 +19,9 @@ async function main() {
     root: { type: 'string' }, name: { type: 'string', default: hostname() },
     'allow-write': { type: 'boolean', default: false }, 'allow-shell': { type: 'boolean', default: false },
     'allow-screenshot': { type: 'boolean', default: false },
+    'no-screenshot': { type: 'boolean', default: false },
   }, strict: true });
+  if (values['allow-screenshot'] && values['no-screenshot']) throw new Error('--allow-screenshot and --no-screenshot cannot be used together.');
   if (!values.root) throw new Error('--root is required. Pass --root "$HOME" to expose your home directory.');
   const root = realpathSync(values.root);
   if (!statSync(root).isDirectory()) throw new Error('--root must be a directory.');
@@ -73,6 +75,7 @@ async function main() {
   if (values['allow-write']) args.push('--allow-write');
   if (values['allow-shell']) args.push('--allow-shell');
   if (values['allow-screenshot']) args.push('--allow-screenshot');
+  if (values['no-screenshot']) args.push('--no-screenshot');
   const stdout = path.join(logs, 'agent.stdout.log');
   const stderr = path.join(logs, 'agent.stderr.log');
   for (const file of [stdout, stderr]) closeSync(openSync(file, 'a', 0o600));
@@ -116,7 +119,7 @@ async function main() {
     const directory = await api('/api/devices', { owner: true });
     if (/state = running/.test(status.stdout) && directory.devices.some((d) => d.device_id === device.device_id && d.online)) {
       const report = { service, root, allow_write: values['allow-write'], allow_shell: values['allow-shell'],
-        allow_screenshot: values['allow-screenshot'],
+        allow_screenshot: !values['no-screenshot'],
         path_source: terminal.shell ? 'interactive-login-shell' : 'bootstrap', login_shell: terminal.shell,
         pid: Number(status.stdout.match(/\bpid = (\d+)/)?.[1]), device_id: device.device_id,
         checked_at: new Date().toISOString(), online: true, keep_alive: false };

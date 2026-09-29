@@ -213,7 +213,7 @@ test('Rust agent → Cloudflare Durable Object → official MCP client', { timeo
     await until(() => pairing.status !== 'running', 'native pairing completion');
     assert.equal(pairing.status.code, 0); assert.equal(statSync(config).mode & 0o777, 0o600);
     const paired = JSON.parse(readFileSync(config, 'utf8'));
-    const readonly = h.agent(config);
+    const readonly = h.agent(config, ['--no-screenshot']);
     await until(async () => (await h.admin('/api/devices')).data.devices.some((d) => d.device_id === paired.device_id && d.online), 'read-only agent connection');
     const secondary = { device_id: paired.device_id };
     await call(client, 'write_file', { ...secondary, path: 'readonly-denied', content: 'no' }, true);

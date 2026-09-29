@@ -53,7 +53,7 @@ Start the agent with an existing directory:
   --insecure-localhost
 ```
 
-This enables file reads. Add `--allow-write` for edits, `--allow-shell` for process sessions, and `--allow-screenshot` to expose `get_screenshot` on macOS. Screenshot capture also requires macOS Screen Recording permission for the agent binary. Both the OAuth scope and the relevant local flag must permit an operation. The `--root` capability confines the file tools; it is not a shell sandbox and does not scope screenshots. Shell execution has the operating-system user's authority. Stop with Ctrl+C, use `shutdown_device`, or revoke the computer in the dashboard.
+This enables file reads. Add `--allow-write` for edits and `--allow-shell` for process sessions. Screenshot capture is enabled by default on macOS; pass `--no-screenshot` to disable it. The legacy `--allow-screenshot` flag remains accepted for compatibility. Screenshot capture still requires macOS Screen Recording permission for the agent binary. The `--root` capability confines the file tools; it is not a shell sandbox and does not scope screenshots. Shell execution has the operating-system user's authority. Stop with Ctrl+C, use `shutdown_device`, or revoke the computer in the dashboard.
 
 Production pairing and agent commands use the public HTTPS origin and omit `--insecure-localhost`. An optional macOS LaunchAgent installer is available; see below.
 
@@ -132,7 +132,7 @@ Generic MCP clients are available for local integration tests only: set `CHATGPT
 After deploying and building the release agent, obtain a short-lived owner Access session as described in [operations](docs/OPERATIONS.md#owner-login-for-setup-commands), then run:
 
 ```sh
-npm run setup:macos -- --root "$HOME" --name "My Mac" --allow-write --allow-shell --allow-screenshot
+npm run setup:macos -- --root "$HOME" --name "My Mac" --allow-write --allow-shell
 ```
 
 This pairs the Mac using your local owner key, installs the binary and private device credential under `~/Library/Application Support/Remote Commander/`, and starts `app.remote-commander.agent`. The LaunchAgent uses `RunAtLoad=true` and `KeepAlive=false`; network reconnection happens inside the running agent. Logs are private under `~/Library/Logs/Remote Commander/`. Re-running reuses the same device and updates the binary and arguments. Shell commands run with your OS user’s authority; home is their initial working directory, not a shell sandbox.
@@ -148,7 +148,7 @@ launchctl bootout "gui/$(id -u)/app.remote-commander.agent"
 
 See [operations](docs/OPERATIONS.md) for restart, removal, and access recovery. `npm run check:live` verifies the actual installed agent using a disposable home-directory fixture, then revokes its temporary test authorization. It refuses to replace a linked ChatGPT connection or an open linking window; use it before connecting ChatGPT.
 
-After connecting, start with `list_devices`, then `ping_device` and `get_config`. File paths are relative to home: `Documents/example.txt` addresses `~/Documents/example.txt`. `start_process` returns a session ID; retrieve output with `read_process_output`. On an agent started with `--allow-screenshot`, `get_screenshot` returns a bounded JPEG MCP image for one display; the default is display 1 with a 1600-pixel maximum dimension.
+After connecting, start with `list_devices`, then `ping_device` and `get_config`. File paths are relative to home: `Documents/example.txt` addresses `~/Documents/example.txt`. `start_process` returns a session ID; retrieve output with `read_process_output`. Screenshot access is enabled by default unless the agent is started with `--no-screenshot`; `get_screenshot` returns a bounded JPEG MCP image for one display, defaulting to display 1 with a 1600-pixel maximum dimension.
 
 For explicitly authorized machine-wide file access, use `--root / --allow-write --allow-shell` and grant the installed agent **Full Disk Access** in macOS settings; see [machine-wide access](docs/OPERATIONS.md#machine-wide-file-access-and-macos-privacy). With `/` as root, paths use `Users/yuya/Documents/example.txt`. Launch GUI apps through Launch Services, for example `start_process` with `/usr/bin/open -a 'Microsoft Edge'`.
 
